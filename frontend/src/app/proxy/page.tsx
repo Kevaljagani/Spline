@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Breadcrumb,
@@ -23,46 +23,113 @@ import { Textarea } from "@/components/ui/textarea"
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
+interface InterceptedRequest {
+  id: number
+  method: string
+  url: string
+  headers: Record<string, string>
+  body: string | null
+  host: string
+  timestamp: string
+}
+
 export default function ProxyPage() {
   const [isProxyEnabled, setIsProxyEnabled] = useState(false)
   const [contextNotes, setContextNotes] = useState("")
+  const [requests, setRequests] = useState<InterceptedRequest[]>([])
+  const [selectedRequestIndex, setSelectedRequestIndex] = useState(0)
+  const [isConnected, setIsConnected] = useState(false)
+  const wsRef = useRef<WebSocket | null>(null)
 
-  const sampleRequest = `GET /api/users HTTP/1.1
-Host: example.com
-User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
-Accept: application/json
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-Content-Type: application/json
-
-{
-  "filter": "active",
-  "limit": 50
-}`
-
-  const sampleResponse = `HTTP/1.1 200 OK
-Content-Type: application/json
-Content-Length: 1234
-Date: Mon, 22 Jul 2025 10:30:00 GMT
-Server: nginx/1.18.0
-
-{
-  "status": "success",
-  "data": [
-    {
-      "id": 1,
-      "name": "John Doe",
-      "email": "john@example.com",
-      "role": "admin"
-    },
-    {
-      "id": 2,
-      "name": "Jane Smith", 
-      "email": "jane@example.com",
-      "role": "user"
+  useEffect(() => {
+    const connectWebSocket = () => {
+      const ws = new WebSocket('ws://localhost:3001')
+      
+      ws.onopen = () => {
+        console.log('Connected to WebSocket')
+        setIsConnected(true)
+      }
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          if (data.type === 'new_request') {
+            const newRequest: InterceptedRequest = {
+              id: data.id,
+              method: data.method,
+              url: data.url,
+              headers: data.headers,
+              body: data.body,
+              host: data.host,
+              timestamp: new Date().toISOString()
+            }
+            setRequests(prev => [...prev, newRequest])
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error)
+        }
+      }
+      
+      ws.onclose = () => {
+        console.log('WebSocket disconnected')
+        setIsConnected(false)
+        // Reconnect after 3 seconds
+        setTimeout(connectWebSocket, 3000)
+      }
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error)
+      }
+      
+      wsRef.current = ws
     }
-  ],
-  "total": 2
-}`
+    
+    connectWebSocket()
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
+  }, [])
+
+  const handleProxyDecision = (action: 'forward' | 'drop') => {
+    if (requests.length === 0) return
+    
+    const currentRequest = requests[selectedRequestIndex]
+    if (!currentRequest) return
+    
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'proxy_decision',
+        requestId: currentRequest.id,
+        action: action
+      }))
+    }
+    
+    // Remove the handled request
+    setRequests(prev => prev.filter((_, index) => index !== selectedRequestIndex))
+    // Adjust selected index if needed
+    if (selectedRequestIndex >= requests.length - 1) {
+      setSelectedRequestIndex(Math.max(0, requests.length - 2))
+    }
+  }
+
+  const formatRequestDisplay = (request: InterceptedRequest) => {
+    const headerLines = Object.entries(request.headers)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join('\n')
+    
+    let requestText = `${request.method} ${request.url} HTTP/1.1\n${headerLines}`
+    
+    if (request.body) {
+      requestText += `\n\n${request.body}`
+    }
+    
+    return requestText
+  }
+
+  const currentRequest = requests[selectedRequestIndex]
 
   return (
     <div className="flex h-screen bg-background">
@@ -91,99 +158,125 @@ Server: nginx/1.18.0
               </Breadcrumb>
             </div>
             
-            <div className="flex bg-secondary items-center gap-3 border rounded-lg p-2">
-              <span className={`text-sm font-medium `}>
-                Intercept
-              </span>
-              <Switch
-                checked={isProxyEnabled}
-                onCheckedChange={setIsProxyEnabled}
-                className={`${
-                  isProxyEnabled 
-                    ? 'data-[state=checked]:bg-green-500' 
-                    : 'data-[state=unchecked]:bg-red-500'
-                }`}
-              />
+            <div className="flex items-center gap-4">
+              <div className="flex bg-secondary items-center gap-3 border rounded-lg p-2">
+                <span className={`text-sm font-medium`}>
+                  Intercept
+                </span>
+                <Switch
+                  checked={isConnected}
+                  onCheckedChange={setIsProxyEnabled}
+                  disabled={!isConnected}
+                  className={`${
+                    isConnected
+                      ? 'data-[state=checked]:bg-green-500' 
+                      : 'data-[state=unchecked]:bg-red-500'
+                  }`}
+                />
+              </div>
             </div>
           </header>
           
           <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
-            {/* Main Content - Request/Response Split */}
+            {/* Request Queue Header */}
+            <div className="flex items-center gap-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg min-h-[60px]">
+              <span className="text-sm font-medium">
+                {requests.length > 0 ? 'Queue:' : 'Waiting for requests...'}
+              </span>
+              <div className="flex gap-2">
+                {requests.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedRequestIndex(index)}
+                    className={`w-8 h-8 rounded text-xs ${
+                      index === selectedRequestIndex
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-gray-200 hover:bg-gray-300'
+                    }`}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Main Content */}
             <div className="flex-1 flex gap-4 min-h-0">
               {/* Left Side - Request */}
-              <div className="flex-1 flex flex-col gap-2">
+              <div className="w-1/2 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold">HTTP Request</h3>
+                  <h3 className="text-lg font-semibold">Request</h3>
                   <div className="flex gap-2">
-                    <Button size="sm">
+                    <Button 
+                      size="sm" 
+                      onClick={() => handleProxyDecision('forward')}
+                      disabled={!currentRequest}
+                    >
                       Forward
                     </Button>
-                    <Button size="sm" variant="outline" className="se">
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => handleProxyDecision('drop')}
+                      disabled={!currentRequest}
+                    >
                       Drop
                     </Button>
-                    <Button size="sm" variant="ai">
+                    <Button size="sm" variant="ai" disabled={!currentRequest}>
                       Add to Context
                     </Button>
                   </div>
                 </div>
                 <div className="flex-1 rounded-lg border overflow-hidden">
-                  <SyntaxHighlighter
-                    language="http"
-                    style={oneLight}
-                    customStyle={{
-                      margin: 0,
-                      height: '100%',
-                      fontSize: '14px',
-                    }}
-                    wrapLongLines={true}
-                  >
-                    {sampleRequest}
-                  </SyntaxHighlighter>
+                  {currentRequest ? (
+                    <SyntaxHighlighter
+                      language="http"
+                      style={oneLight}
+                      customStyle={{
+                        margin: 0,
+                        height: '100%',
+                        fontSize: '14px',
+                      }}
+                      wrapLongLines={true}
+                    >
+                      {formatRequestDisplay(currentRequest)}
+                    </SyntaxHighlighter>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+                      Configure your browser to use localhost:8080 as HTTP proxy
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Right Side - Response */}
               <div className="flex-1 flex flex-col gap-2">
-                <h3 className="text-lg font-semibold">HTTP Response</h3>
+                <h3 className="text-lg font-semibold">Response</h3>
                 <div className="flex-1 rounded-lg border overflow-hidden">
-                  <SyntaxHighlighter
-                    language="http"
-                    style={oneLight}
-                    customStyle={{
-                      margin: 0,
-                      height: '100%',
-                      fontSize: '14px',
-                    }}
-                    wrapLongLines={true}
-                  >
-                    {sampleResponse}
-                  </SyntaxHighlighter>
+                  <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+                    Response will appear here after forwarding the request
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Bottom Section - Context Tab */}
-            <div className="h-48 border-t pt-4">
-              <Tabs defaultValue="context" className="h-full flex flex-col">
-                <TabsList className="grid w-full grid-cols-1 max-w-[200px]">
-                  <TabsTrigger value="context">Context</TabsTrigger>
-                </TabsList>
-                <TabsContent value="context" className="flex-1 flex flex-col gap-2 mt-2">
-                  <div className="flex-1">
-                    <Textarea
-                      placeholder="Add context notes for AI analysis..."
-                      value={contextNotes}
-                      onChange={(e) => setContextNotes(e.target.value)}
-                      className="h-full resize-none"
-                    />
-                  </div>
-                  <div className="flex justify-end">
-                    <Button size="sm" variant="ai">
-                      Send to Xploiter
-                    </Button>
-                  </div>
-                </TabsContent>
-              </Tabs>
+            {/* Bottom Section - Context */}
+            <div className="h-24">
+              <div className="h-full relative">
+                <Textarea
+                  placeholder="Add context notes for AI analysis..."
+                  value={contextNotes}
+                  onChange={(e) => setContextNotes(e.target.value)}
+                  className="h-full resize-none pr-32"
+                />
+                <Button 
+                  size="sm" 
+                  variant="ai"
+                  className="absolute bottom-2 right-2"
+                >
+                  Send to Xploiter
+                </Button>
+              </div>
             </div>
           </div>
         </SidebarInset>
