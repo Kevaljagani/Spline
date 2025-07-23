@@ -16,10 +16,6 @@ class ProxyController {
   }
 
   async handleProxyRequest(req, res) {
-    // // Skip CONNECT method for HTTPS tunneling - let it pass through
-    // if (req.method === 'CONNECT') {
-    //   return this.handleConnectPassthrough(req, res);
-    // }
 
     const currentRequestId = ++this.requestId;
     
@@ -33,7 +29,6 @@ class ProxyController {
       req.headers.host
     );
     
-    console.log(`Intercepted request ${currentRequestId}: ${req.method} ${req.url}`);
     
     // Read request body if present
     let body = '';
@@ -79,45 +74,12 @@ class ProxyController {
   }
 
   async handleConnect(req, socket, head) {
-    const currentRequestId = ++this.requestId;
     const [hostname, port] = req.url.split(':');
     
-    // Create request model for CONNECT
-    const requestModel = new Request(
-      currentRequestId,
-      'CONNECT',
-      req.url,
-      req.headers,
-      null,
-      hostname
-    );
-    
-    console.log(`Intercepted CONNECT request ${currentRequestId}: ${req.url}`);
     
     try {
-      // Create promise to wait for user decision
-      const userDecision = new Promise((resolve) => {
-        this.pendingRequests.set(currentRequestId, { 
-          resolve, 
-          requestModel 
-        });
-      });
-      
-      // Broadcast request to frontend
-      this.broadcastRequest(requestModel);
-      
-      // Wait for user decision with timeout
-      const shouldForward = await Promise.race([
-        userDecision,
-        new Promise(resolve => setTimeout(() => resolve(false), 30000))
-      ]);
-      
-      if (shouldForward) {
-        this.forwardConnect(req, socket, head, hostname, port || 443, requestModel);
-      } else {
-        this.dropConnect(socket, requestModel);
-      }
-      
+      // Directly forward CONNECT requests without interception
+      this.forwardConnect(req, socket, head, hostname, port || 443, null);
     } catch (error) {
       console.error('Error processing CONNECT:', error);
       socket.end('HTTP/1.1 500 Internal Server Error\r\n\r\n');
@@ -132,8 +94,9 @@ class ProxyController {
       targetSocket.pipe(socket);
       socket.pipe(targetSocket);
       
-      requestModel.markForwarded();
-      console.log(`CONNECT request ${requestModel.id} forwarded to ${hostname}:${port}`);
+      if (requestModel) {
+        requestModel.markForwarded();
+      }
     });
     
     targetSocket.on('error', (err) => {
@@ -143,13 +106,18 @@ class ProxyController {
   }
 
   dropConnect(socket, requestModel) {
-    console.log(`CONNECT request ${requestModel.id} dropped`);
     socket.end('HTTP/1.1 403 Connection blocked by Torpedo\r\n\r\n');
     requestModel.markDropped();
   }
 
-  async forwardRequest(req, res, requestModel, body) {
-    const targetUrl = `http://${req.headers.host}${req.url}`;
+  async forwardRequest(req, res, requestModel, body) {    
+    // Handle both absolute URLs and relative paths
+    let targetUrl;
+    if (req.url.startsWith('http://') || req.url.startsWith('https://')) {
+      targetUrl = req.url;
+    } else {
+      targetUrl = `http://${req.headers.host}${req.url}`;
+    }
     const parsedUrl = new URL(targetUrl);
     
     const options = {
@@ -163,14 +131,54 @@ class ProxyController {
     delete options.headers['proxy-connection'];
     
     const proxyReq = http.request(options, (proxyRes) => {
+      // Capture response for frontend
+      let responseBody = '';
+      let responseBodyBuffer = Buffer.alloc(0);
+      
       res.writeHead(proxyRes.statusCode, proxyRes.headers);
-      proxyRes.pipe(res);
+      
+      // Capture response data
+      proxyRes.on('data', (chunk) => {
+        responseBodyBuffer = Buffer.concat([responseBodyBuffer, chunk]);
+        res.write(chunk);
+      });
+      
+      proxyRes.on('end', () => {
+        res.end();
+        
+        // Convert buffer to string for display, handle binary content
+        try {
+          responseBody = responseBodyBuffer.toString('utf8');
+          // Check if it's likely binary content
+          if (responseBodyBuffer.length > 0 && responseBody.includes('\ufffd')) {
+            responseBody = `[Binary content - ${responseBodyBuffer.length} bytes]`;
+          }
+        } catch (error) {
+          responseBody = `[Binary content - ${responseBodyBuffer.length} bytes]`;
+        }
+        
+        // Send response to frontend
+        this.broadcastResponse(requestModel.id, {
+          statusCode: proxyRes.statusCode,
+          headers: proxyRes.headers,
+          body: responseBody,
+          timestamp: new Date().toISOString()
+        });
+      });
     });
     
     proxyReq.on('error', (err) => {
       console.error('Proxy request error:', err);
       res.writeHead(500);
       res.end('Proxy Error');
+      
+      // Send error response to frontend
+      this.broadcastResponse(requestModel.id, {
+        statusCode: 500,
+        headers: {},
+        body: 'Proxy Error: ' + err.message,
+        timestamp: new Date().toISOString()
+      });
     });
     
     if (body) {
@@ -179,11 +187,9 @@ class ProxyController {
     proxyReq.end();
     
     requestModel.markForwarded();
-    console.log(`Request ${requestModel.id} forwarded`);
   }
 
   dropRequest(res, requestModel) {
-    console.log(`Request ${requestModel.id} dropped`);
     res.writeHead(200);
     res.end('Request dropped by Torpedo');
     requestModel.markDropped();
@@ -194,7 +200,6 @@ class ProxyController {
       const { resolve, requestModel } = this.pendingRequests.get(requestId);
       this.pendingRequests.delete(requestId);
       
-      console.log(`User decision for request ${requestId}: ${action}`);
       resolve(action === 'forward');
     }
   }
@@ -210,6 +215,27 @@ class ProxyController {
     this.websocketServer.clients.forEach((client) => {
       if (client.readyState === 1) { // WebSocket.OPEN
         client.send(message);
+      }
+    });
+  }
+
+  broadcastResponse(requestId, response) {
+    if (!this.websocketServer) {
+      console.warn(`No WebSocket server available to broadcast response for request ${requestId}`);
+      return;
+    }
+    
+    const message = JSON.stringify({
+      type: 'response',
+      requestId: requestId,
+      response: response
+    });
+    
+    let clientCount = 0;
+    this.websocketServer.clients.forEach((client) => {
+      if (client.readyState === 1) { // WebSocket.OPEN
+        client.send(message);
+        clientCount++;
       }
     });
   }

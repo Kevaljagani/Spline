@@ -33,6 +33,8 @@ interface InterceptedRequest {
   timestamp: string
 }
 
+
+
 export default function ProxyPage() {
   const [isProxyEnabled, setIsProxyEnabled] = useState(false)
   const [contextNotes, setContextNotes] = useState("")
@@ -46,13 +48,13 @@ export default function ProxyPage() {
       const ws = new WebSocket('ws://localhost:3001')
       
       ws.onopen = () => {
-        console.log('Connected to WebSocket')
         setIsConnected(true)
       }
       
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
+          
           if (data.type === 'new_request') {
             const newRequest: InterceptedRequest = {
               id: data.id,
@@ -71,7 +73,6 @@ export default function ProxyPage() {
       }
       
       ws.onclose = () => {
-        console.log('WebSocket disconnected')
         setIsConnected(false)
         // Reconnect after 3 seconds
         setTimeout(connectWebSocket, 3000)
@@ -107,7 +108,7 @@ export default function ProxyPage() {
       }))
     }
     
-    // Remove the handled request
+    // Always remove the request after decision
     setRequests(prev => prev.filter((_, index) => index !== selectedRequestIndex))
     // Adjust selected index if needed
     if (selectedRequestIndex >= requests.length - 1) {
@@ -201,62 +202,50 @@ export default function ProxyPage() {
             </div>
 
             {/* Main Content */}
-            <div className="flex-1 flex gap-4 min-h-0">
-              {/* Left Side - Request */}
-              <div className="w-1/2 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold">Request</h3>
-                  <div className="flex gap-2">
-                    <Button 
-                      size="sm" 
-                      onClick={() => handleProxyDecision('forward')}
-                      disabled={!currentRequest}
-                    >
-                      Forward
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      onClick={() => handleProxyDecision('drop')}
-                      disabled={!currentRequest}
-                    >
-                      Drop
-                    </Button>
-                    <Button size="sm" variant="ai" disabled={!currentRequest}>
-                      Add to Context
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex-1 rounded-lg border overflow-hidden">
-                  {currentRequest ? (
-                    <SyntaxHighlighter
-                      language="http"
-                      style={oneLight}
-                      customStyle={{
-                        margin: 0,
-                        height: '100%',
-                        fontSize: '14px',
-                      }}
-                      wrapLongLines={true}
-                    >
-                      {formatRequestDisplay(currentRequest)}
-                    </SyntaxHighlighter>
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                      Configure your browser to use localhost:8080 as HTTP proxy
-                    </div>
-                  )}
+            <div className="flex-1 flex flex-col gap-2 min-h-0">
+              {/* Request Section */}
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Request</h3>
+                <div className="flex gap-2">
+                  <Button 
+                    size="sm" 
+                    onClick={() => handleProxyDecision('forward')}
+                    disabled={!currentRequest}
+                  >
+                    Forward
+                  </Button>
+                  <Button 
+                    size="sm" 
+                    variant="outline" 
+                    onClick={() => handleProxyDecision('drop')}
+                    disabled={!currentRequest}
+                  >
+                    Drop
+                  </Button>
+                  <Button size="sm" variant="ai" disabled={!currentRequest}>
+                    Add to Context
+                  </Button>
                 </div>
               </div>
-
-              {/* Right Side - Response */}
-              <div className="flex-1 flex flex-col gap-2">
-                <h3 className="text-lg font-semibold">Response</h3>
-                <div className="flex-1 rounded-lg border overflow-hidden">
+              <div className="flex-1 rounded-lg border overflow-hidden">
+                {currentRequest ? (
+                  <SyntaxHighlighter
+                    language="http"
+                    style={oneLight}
+                    customStyle={{
+                      margin: 0,
+                      height: '100%',
+                      fontSize: '14px',
+                    }}
+                    wrapLongLines={true}
+                  >
+                    {formatRequestDisplay(currentRequest)}
+                  </SyntaxHighlighter>
+                ) : (
                   <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                    Response will appear here after forwarding the request
+                    Configure your browser to use localhost:8080 as HTTP proxy
                   </div>
-                </div>
+                )}
               </div>
             </div>
 
