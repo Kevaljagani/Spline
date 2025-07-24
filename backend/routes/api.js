@@ -75,4 +75,66 @@ router.get('/stored-responses/:requestId', async (req, res) => {
   }
 });
 
+// Replay a request
+router.post('/replay-request', async (req, res) => {
+  try {
+    const { method, url, headers, body } = req.body;
+    
+    if (!method || !url) {
+      return res.status(400).json({ error: 'method and url are required' });
+    }
+
+    const https = require('https');
+    const http = require('http');
+    const urlParse = require('url');
+    
+    const parsedUrl = urlParse.parse(url);
+    const isHttps = parsedUrl.protocol === 'https:';
+    const port = parsedUrl.port || (isHttps ? 443 : 80);
+    
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: port,
+      path: parsedUrl.path,
+      method: method,
+      headers: headers || {},
+      rejectUnauthorized: false // For testing purposes - accept self-signed certs
+    };
+
+    const client = isHttps ? https : http;
+    
+    const request = client.request(options, (response) => {
+      let responseBody = '';
+      
+      response.on('data', (chunk) => {
+        responseBody += chunk;
+      });
+      
+      response.on('end', () => {
+        res.json({
+          status: response.statusCode,
+          headers: response.headers,
+          body: responseBody
+        });
+      });
+    });
+    
+    request.on('error', (error) => {
+      console.error('Replay request error:', error);
+      res.status(500).json({ error: 'Failed to replay request: ' + error.message });
+    });
+    
+    // Send the request body if provided
+    if (body) {
+      request.write(body);
+    }
+    
+    request.end();
+    
+  } catch (error) {
+    console.error('Error replaying request:', error);
+    res.status(500).json({ error: 'Failed to replay request: ' + error.message });
+  }
+});
+
 module.exports = router;

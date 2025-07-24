@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState } from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Breadcrumb,
@@ -24,6 +24,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { useToast } from '@/hooks/use-toast'
 import { Toaster } from '@/components/ui/toaster'
+import { useWebSocket } from "@/contexts/WebSocketContext"
 
 interface InterceptedRequest {
   id: number
@@ -38,86 +39,10 @@ interface InterceptedRequest {
 
 
 export default function ProxyPage() {
-  const [isInterceptEnabled, setIsInterceptEnabled] = useState(false)
   const [contextNotes, setContextNotes] = useState("")
-  const [requests, setRequests] = useState<InterceptedRequest[]>([])
   const [selectedRequestIndex, setSelectedRequestIndex] = useState(0)
-  const [isConnected, setIsConnected] = useState(false)
-  const wsRef = useRef<WebSocket | null>(null)
   const { toast } = useToast()
-
-  useEffect(() => {
-    const connectWebSocket = () => {
-      const ws = new WebSocket('ws://localhost:3001')
-      
-      ws.onopen = () => {
-        setIsConnected(true)
-        // Send current intercept state to backend
-        fetch('http://localhost:3001/api/set-intercept', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled: isInterceptEnabled })
-        })
-      }
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          console.log('WebSocket message received:', data)
-          
-          if (data.type === 'new_request') {
-            const newRequest: InterceptedRequest = {
-              id: data.id,
-              method: data.method,
-              url: data.url,
-              headers: data.headers,
-              body: data.body,
-              host: data.host,
-              timestamp: new Date().toISOString()
-            }
-            
-            console.log('Adding request to queue:', newRequest)
-            
-            // Add to queue for manual review (only sent when intercept is enabled)
-            setRequests(prev => [...prev, newRequest])
-          }
-        } catch (error) {
-          console.error('Error parsing WebSocket message:', error)
-        }
-      }
-      
-      ws.onclose = () => {
-        setIsConnected(false)
-        // Reconnect after 3 seconds
-        setTimeout(connectWebSocket, 3000)
-      }
-      
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
-      }
-      
-      wsRef.current = ws
-    }
-    
-    connectWebSocket()
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close()
-      }
-    }
-  }, [])
-
-  // Handle intercept toggle changes
-  useEffect(() => {
-    if (isConnected) {
-      fetch('http://localhost:3001/api/set-intercept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: isInterceptEnabled })
-      })
-    }
-  }, [isInterceptEnabled, isConnected])
+  const { isConnected, requests, setRequests, sendMessage, isInterceptEnabled, setIsInterceptEnabled } = useWebSocket()
 
   const handleProxyDecision = (action: 'forward' | 'drop') => {
     if (requests.length === 0) return
@@ -125,13 +50,11 @@ export default function ProxyPage() {
     const currentRequest = requests[selectedRequestIndex]
     if (!currentRequest) return
     
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'proxy_decision',
-        requestId: currentRequest.id,
-        action: action
-      }))
-    }
+    sendMessage({
+      type: 'proxy_decision',
+      requestId: currentRequest.id,
+      action: action
+    })
     
     // Always remove the request after decision
     setRequests(prev => prev.filter((_, index) => index !== selectedRequestIndex))
@@ -144,16 +67,14 @@ export default function ProxyPage() {
   const handleDropAll = () => {
     if (requests.length === 0) return
     
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      // Send drop decision for all requests
-      requests.forEach(request => {
-        wsRef.current?.send(JSON.stringify({
-          type: 'proxy_decision',
-          requestId: request.id,
-          action: 'drop'
-        }))
+    // Send drop decision for all requests
+    requests.forEach(request => {
+      sendMessage({
+        type: 'proxy_decision',
+        requestId: request.id,
+        action: 'drop'
       })
-    }
+    })
     
     // Clear all requests from queue
     setRequests([])
