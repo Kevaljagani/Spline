@@ -22,6 +22,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { useToast } from '@/hooks/use-toast'
+import { Toaster } from '@/components/ui/toaster'
 
 interface InterceptedRequest {
   id: number
@@ -36,12 +38,13 @@ interface InterceptedRequest {
 
 
 export default function ProxyPage() {
-  const [isProxyEnabled, setIsProxyEnabled] = useState(false)
+  const [isInterceptEnabled, setIsInterceptEnabled] = useState(false)
   const [contextNotes, setContextNotes] = useState("")
   const [requests, setRequests] = useState<InterceptedRequest[]>([])
   const [selectedRequestIndex, setSelectedRequestIndex] = useState(0)
   const [isConnected, setIsConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
+  const { toast } = useToast()
 
   useEffect(() => {
     const connectWebSocket = () => {
@@ -49,11 +52,18 @@ export default function ProxyPage() {
       
       ws.onopen = () => {
         setIsConnected(true)
+        // Send current intercept state to backend
+        fetch('http://localhost:3001/api/set-intercept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: isInterceptEnabled })
+        })
       }
       
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data)
+          console.log('WebSocket message received:', data)
           
           if (data.type === 'new_request') {
             const newRequest: InterceptedRequest = {
@@ -65,6 +75,10 @@ export default function ProxyPage() {
               host: data.host,
               timestamp: new Date().toISOString()
             }
+            
+            console.log('Adding request to queue:', newRequest)
+            
+            // Add to queue for manual review (only sent when intercept is enabled)
             setRequests(prev => [...prev, newRequest])
           }
         } catch (error) {
@@ -94,6 +108,17 @@ export default function ProxyPage() {
     }
   }, [])
 
+  // Handle intercept toggle changes
+  useEffect(() => {
+    if (isConnected) {
+      fetch('http://localhost:3001/api/set-intercept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: isInterceptEnabled })
+      })
+    }
+  }, [isInterceptEnabled, isConnected])
+
   const handleProxyDecision = (action: 'forward' | 'drop') => {
     if (requests.length === 0) return
     
@@ -113,6 +138,55 @@ export default function ProxyPage() {
     // Adjust selected index if needed
     if (selectedRequestIndex >= requests.length - 1) {
       setSelectedRequestIndex(Math.max(0, requests.length - 2))
+    }
+  }
+
+  const handleDropAll = () => {
+    if (requests.length === 0) return
+    
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      // Send drop decision for all requests
+      requests.forEach(request => {
+        wsRef.current?.send(JSON.stringify({
+          type: 'proxy_decision',
+          requestId: request.id,
+          action: 'drop'
+        }))
+      })
+    }
+    
+    // Clear all requests from queue
+    setRequests([])
+    setSelectedRequestIndex(0)
+  }
+
+  const handleAddToScope = async () => {
+    if (requests.length === 0) return
+    
+    const currentRequest = requests[selectedRequestIndex]
+    if (!currentRequest) return
+    
+    try {
+      const response = await fetch('http://localhost:3001/api/add-to-scope', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          domain: currentRequest.host
+        }),
+      })
+      
+      if (response.ok) {
+        console.log(`Added ${currentRequest.host} to scope`)
+        toast({
+          variant: "success",
+          title: "Domain Added to Scope",
+          description: `Domain '${currentRequest.host}' has been added to scope`,
+        })
+      }
+    } catch (error) {
+      console.error('Error adding to scope:', error)
     }
   }
 
@@ -165,13 +239,13 @@ export default function ProxyPage() {
                   Intercept
                 </span>
                 <Switch
-                  checked={isConnected}
-                  onCheckedChange={setIsProxyEnabled}
+                  checked={isInterceptEnabled}
+                  onCheckedChange={setIsInterceptEnabled}
                   disabled={!isConnected}
                   className={`${
-                    isConnected
+                    isInterceptEnabled
                       ? 'data-[state=checked]:bg-green-500' 
-                      : 'data-[state=unchecked]:bg-red-500'
+                      : 'data-[state=unchecked]:bg-gray-500'
                   }`}
                 />
               </div>
@@ -180,24 +254,34 @@ export default function ProxyPage() {
           
           <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
             {/* Request Queue Header */}
-            <div className="flex items-center gap-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg min-h-[60px]">
-              <span className="text-sm font-medium">
-                {requests.length > 0 ? 'Queue:' : 'Waiting for requests...'}
-              </span>
-              <div className="flex gap-2">
-                {requests.map((_, index) => (
-                  <button
-                    key={index}
-                    onClick={() => setSelectedRequestIndex(index)}
-                    className={`w-8 h-8 rounded text-xs ${
-                      index === selectedRequestIndex
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-gray-200 hover:bg-gray-300'
-                    }`}
+            <div className="flex items-center justify-between gap-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg min-h-[60px]">
+              <div className="flex items-center gap-4">
+                {requests.length === 0 ? (
+                  <span className="text-sm font-medium">Waiting for requests...</span>
+                ) : (
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={handleDropAll}
                   >
-                    {index + 1}
-                  </button>
-                ))}
+                    Drop All
+                  </Button>
+                )}
+                <div className="flex gap-2">
+                  {requests.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setSelectedRequestIndex(index)}
+                      className={`w-8 h-8 rounded text-xs ${
+                        index === selectedRequestIndex
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-gray-200 hover:bg-gray-300'
+                      }`}
+                    >
+                      {index + 1}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -207,6 +291,14 @@ export default function ProxyPage() {
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Request</h3>
                 <div className="flex gap-2">
+                  <Button 
+                    size="sm" 
+                    variant="dashedOutline" 
+                    onClick={handleAddToScope}
+                    disabled={!currentRequest}
+                  >
+                    Add to Scope
+                  </Button>
                   <Button 
                     size="sm" 
                     onClick={() => handleProxyDecision('forward')}
@@ -270,6 +362,7 @@ export default function ProxyPage() {
           </div>
         </SidebarInset>
       </SidebarProvider>
+      <Toaster />
     </div>
   )
 }

@@ -2,17 +2,109 @@ const http = require('http');
 const https = require('https');
 const net = require('net');
 const url = require('url');
+const fs = require('fs');
+const path = require('path');
+const tls = require('tls');
+const forge = require('node-forge');
 const Request = require('../models/Request');
+const database = require('../database');
 
 class ProxyController {
   constructor() {
     this.pendingRequests = new Map();
     this.requestId = 0;
     this.websocketServer = null;
+    this.scopedDomains = new Set();
+    this.isInterceptEnabled = false;
+    this.loadSSLCertificates();
+  }
+
+  loadSSLCertificates() {
+    try {
+      const caCertPath = path.join(__dirname, '../certs/ca-cert.pem');
+      const caKeyPath = path.join(__dirname, '../certs/ca-key.pem');
+      
+      this.caCert = forge.pki.certificateFromPem(fs.readFileSync(caCertPath, 'utf8'));
+      this.caKey = forge.pki.privateKeyFromPem(fs.readFileSync(caKeyPath, 'utf8'));
+      this.certificateCache = new Map();
+      
+    } catch (error) {
+      console.error('Failed to load CA certificates:', error.message);
+      this.caCert = null;
+      this.caKey = null;
+    }
   }
 
   setWebSocketServer(wss) {
     this.websocketServer = wss;
+  }
+
+  generateCertificateForDomain(domain) {
+    if (this.certificateCache.has(domain)) {
+      return this.certificateCache.get(domain);
+    }
+
+    if (!this.caCert || !this.caKey) {
+      throw new Error('CA certificate not loaded');
+    }
+
+    // Generate key pair for the domain
+    const keys = forge.pki.rsa.generateKeyPair(2048);
+    const cert = forge.pki.createCertificate();
+
+    cert.publicKey = keys.publicKey;
+    cert.serialNumber = Math.floor(Math.random() * 100000).toString();
+    cert.validity.notBefore = new Date();
+    cert.validity.notAfter = new Date();
+    cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
+
+    // Set subject for the domain
+    cert.setSubject([
+      { name: 'countryName', value: 'US' },
+      { name: 'stateOrProvinceName', value: 'CA' },
+      { name: 'localityName', value: 'San Francisco' },
+      { name: 'organizationName', value: 'Torpedo Proxy' },
+      { name: 'organizationalUnitName', value: 'Generated Certificate' },
+      { name: 'commonName', value: domain }
+    ]);
+
+    // Set issuer to CA
+    cert.setIssuer(this.caCert.subject.attributes);
+
+    // Set extensions
+    cert.setExtensions([
+      {
+        name: 'basicConstraints',
+        cA: false
+      },
+      {
+        name: 'keyUsage',
+        digitalSignature: true,
+        keyEncipherment: true
+      },
+      {
+        name: 'extKeyUsage',
+        serverAuth: true
+      },
+      {
+        name: 'subjectAltName',
+        altNames: [
+          { type: 2, value: domain },
+          { type: 2, value: `*.${domain}` }
+        ]
+      }
+    ]);
+
+    // Sign with CA key
+    cert.sign(this.caKey, forge.md.sha256.create());
+
+    const certificateData = {
+      cert: forge.pki.certificateToPem(cert),
+      key: forge.pki.privateKeyToPem(keys.privateKey)
+    };
+
+    this.certificateCache.set(domain, certificateData);
+    return certificateData;
   }
 
   async handleProxyRequest(req, res) {
@@ -41,28 +133,43 @@ class ProxyController {
         requestModel.body = body;
       }
       
+      // Save request to database if host is in scoped domains
+      if (this.scopedDomains.has(requestModel.host)) {
+        try {
+          await database.saveRequest(requestModel);
+        } catch (dbError) {
+          console.error('Error saving request to database:', dbError);
+        }
+      }
+      
       try {
-        // Create promise to wait for user decision
-        const userDecision = new Promise((resolve) => {
-          this.pendingRequests.set(currentRequestId, { 
-            resolve, 
-            requestModel 
+        
+        if (this.isInterceptEnabled) {
+          // Broadcast request to frontend for manual review
+          this.broadcastRequest(requestModel);
+          
+          // Create promise to wait for user decision
+          const userDecision = new Promise((resolve) => {
+            this.pendingRequests.set(currentRequestId, { 
+              resolve, 
+              requestModel 
+            });
           });
-        });
-        
-        // Broadcast request to frontend
-        this.broadcastRequest(requestModel);
-        
-        // Wait for user decision with timeout
-        const shouldForward = await Promise.race([
-          userDecision,
-          new Promise(resolve => setTimeout(() => resolve(false), 30000))
-        ]);
-        
-        if (shouldForward) {
-          await this.forwardRequest(req, res, requestModel, body);
+          
+          // Wait for user decision with timeout
+          const shouldForward = await Promise.race([
+            userDecision,
+            new Promise(resolve => setTimeout(() => resolve(false), 30000))
+          ]);
+          
+          if (shouldForward) {
+            await this.forwardRequest(req, res, requestModel, body);
+          } else {
+            this.dropRequest(res, requestModel);
+          }
         } else {
-          this.dropRequest(res, requestModel);
+          // Auto-forward when intercept is disabled (don't broadcast to frontend)
+          await this.forwardRequest(req, res, requestModel, body);
         }
         
       } catch (error) {
@@ -76,13 +183,58 @@ class ProxyController {
   async handleConnect(req, socket, head) {
     const [hostname, port] = req.url.split(':');
     
+    if (!this.caCert || !this.caKey) {
+      console.error('CA certificates not loaded, falling back to direct forwarding');
+      this.forwardConnect(req, socket, head, hostname, port || 443, null);
+      return;
+    }
     
     try {
-      // Directly forward CONNECT requests without interception
-      this.forwardConnect(req, socket, head, hostname, port || 443, null);
+      // Perform SSL termination to intercept HTTPS traffic
+      this.interceptHTTPS(req, socket, head, hostname, port || 443);
     } catch (error) {
       console.error('Error processing CONNECT:', error);
       socket.end('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+    }
+  }
+
+  interceptHTTPS(req, socket, head, hostname, port) {
+    // Tell client that connection is established
+    socket.write('HTTP/1.1 200 Connection established\r\n\r\n');
+    
+    try {
+      // Generate certificate for this domain
+      const { cert, key } = this.generateCertificateForDomain(hostname);
+      
+      // Create HTTPS server with generated certificate
+      const httpsServer = https.createServer({ cert, key }, async (clientReq, clientRes) => {
+        try {
+          // Modify the request URL to include the original hostname
+          clientReq.url = `https://${hostname}:${port}${clientReq.url}`;
+          clientReq.headers.host = hostname;
+          
+          
+          // Use existing HTTP handling logic for intercepted HTTPS requests
+          await this.handleProxyRequest(clientReq, clientRes);
+          
+        } catch (error) {
+          console.error('Error handling HTTPS request:', error);
+          clientRes.writeHead(500);
+          clientRes.end('Internal Server Error');
+        }
+      });
+
+      httpsServer.on('error', (error) => {
+        console.error('HTTPS server error:', error);
+        socket.end();
+      });
+
+      // Handle the encrypted connection by emitting it to the HTTPS server
+      httpsServer.emit('connection', socket);
+      
+    } catch (error) {
+      console.error('Error setting up TLS interception:', error);
+      socket.end();
     }
   }
 
@@ -130,7 +282,9 @@ class ProxyController {
     
     delete options.headers['proxy-connection'];
     
-    const proxyReq = http.request(options, (proxyRes) => {
+    // Use https.request for HTTPS URLs, http.request for HTTP URLs
+    const requestModule = parsedUrl.protocol === 'https:' ? https : http;
+    const proxyReq = requestModule.request(options, (proxyRes) => {
       // Capture response for frontend
       let responseBody = '';
       let responseBodyBuffer = Buffer.alloc(0);
@@ -143,7 +297,7 @@ class ProxyController {
         res.write(chunk);
       });
       
-      proxyRes.on('end', () => {
+      proxyRes.on('end', async () => {
         res.end();
         
         // Convert buffer to string for display, handle binary content
@@ -157,13 +311,25 @@ class ProxyController {
           responseBody = `[Binary content - ${responseBodyBuffer.length} bytes]`;
         }
         
-        // Send response to frontend
-        this.broadcastResponse(requestModel.id, {
+        // Create response object
+        const responseData = {
           statusCode: proxyRes.statusCode,
           headers: proxyRes.headers,
           body: responseBody,
           timestamp: new Date().toISOString()
-        });
+        };
+        
+        // Send response to frontend
+        this.broadcastResponse(requestModel.id, responseData);
+        
+        // Save response to database if host is in scoped domains
+        if (this.scopedDomains.has(requestModel.host)) {
+          try {
+            await database.saveResponse(requestModel.id, responseData);
+          } catch (dbError) {
+            console.error('Error saving response to database:', dbError);
+          }
+        }
       });
     });
     
@@ -205,12 +371,15 @@ class ProxyController {
   }
 
   broadcastRequest(requestModel) {
-    if (!this.websocketServer) return;
+    if (!this.websocketServer) {
+      return;
+    }
     
     const message = JSON.stringify({
       type: 'new_request',
       ...requestModel.toJSON()
     });
+    
     
     this.websocketServer.clients.forEach((client) => {
       if (client.readyState === 1) { // WebSocket.OPEN
@@ -245,6 +414,14 @@ class ProxyController {
       const { requestModel } = this.pendingRequests.get(id);
       return requestModel.toJSON();
     });
+  }
+
+  addToScope(domain) {
+    this.scopedDomains.add(domain);
+  }
+
+  setInterceptEnabled(enabled) {
+    this.isInterceptEnabled = enabled;
   }
 }
 

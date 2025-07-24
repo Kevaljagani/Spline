@@ -81,11 +81,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <NavProjects projects={data.projects} />
       </SidebarContent>
       <SidebarFooter>
-        <div className="flex items-center gap-2 px-2 py-2">
-          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-          {state === "expanded" && (
-            <span className="text-sm text-muted-foreground">API Connected</span>
-          )}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 px-2 py-1">
+            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+            {state === "expanded" && (
+              <span className="text-sm text-muted-foreground">Proxy Connected</span>
+            )}
+          </div>
+          <div className="border-t border-sidebar-border mx-2"></div>
+          <div className="flex items-center gap-2 px-2 py-1">
+            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+            {state === "expanded" && (
+              <span className="text-sm text-muted-foreground">API Connected</span>
+            )}
+          </div>
         </div>
       </SidebarFooter>
       <SidebarRail />
