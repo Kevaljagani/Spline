@@ -13,6 +13,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { ChatInterface } from "@/components/chat-interface"
 
 export default function XploiterPage() {
   return (
@@ -40,24 +41,8 @@ export default function XploiterPage() {
               </BreadcrumbList>
             </Breadcrumb>
           </header>
-          <div className="flex flex-1 flex-col gap-4 p-4 overflow-auto">
-            <div className="grid auto-rows-min gap-4 md:grid-cols-3">
-              <div className="bg-muted/50 aspect-video rounded-xl flex items-center justify-center">
-                <h3 className="text-lg font-medium text-muted-foreground">Vulnerability Scans</h3>
-              </div>
-              <div className="bg-muted/50 aspect-video rounded-xl flex items-center justify-center">
-                <h3 className="text-lg font-medium text-muted-foreground">Attack Vectors</h3>
-              </div>
-              <div className="bg-muted/50 aspect-video rounded-xl flex items-center justify-center">
-                <h3 className="text-lg font-medium text-muted-foreground">Security Reports</h3>
-              </div>
-            </div>
-            <div className="bg-muted/50 min-h-[60vh] flex-1 rounded-xl flex items-center justify-center">
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-muted-foreground mb-2">Xploiter Dashboard</h2>
-                <p className="text-muted-foreground">Perform security testing and exploitation here.</p>
-              </div>
-            </div>
+          <div className="flex flex-1 flex-col gap-4 p-4 overflow-hidden">
+            <ChatInterface className="flex-1" />
           </div>
         </SidebarInset>
       </SidebarProvider>
