@@ -31,6 +31,16 @@ class Database {
           FOREIGN KEY (request_id) REFERENCES requests(id)
         )
       `);
+
+      this.db.run(`
+        CREATE TABLE chat_messages (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          content TEXT NOT NULL,
+          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+          status TEXT
+        )
+      `);
     });
   }
 
@@ -117,6 +127,62 @@ class Database {
           }
         }
       );
+    });
+  }
+
+  saveChatMessage(message) {
+    return new Promise((resolve, reject) => {
+      const stmt = this.db.prepare(`
+        INSERT INTO chat_messages (id, type, content, status)
+        VALUES (?, ?, ?, ?)
+      `);
+      
+      stmt.run(
+        message.id,
+        message.type,
+        message.content,
+        message.status,
+        (err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        }
+      );
+      
+      stmt.finalize();
+    });
+  }
+
+  getChatMessages() {
+    return new Promise((resolve, reject) => {
+      this.db.all('SELECT * FROM chat_messages ORDER BY timestamp ASC', (err, rows) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(rows.map(row => ({
+            ...row,
+            timestamp: new Date(row.timestamp)
+          })));
+        }
+      });
+    });
+  }
+
+  clearAllData() {
+    return new Promise((resolve, reject) => {
+      this.db.serialize(() => {
+        this.db.run('DELETE FROM chat_messages');
+        this.db.run('DELETE FROM responses');
+        this.db.run('DELETE FROM requests', (err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
     });
   }
 

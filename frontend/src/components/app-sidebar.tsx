@@ -8,7 +8,10 @@ import {
   Map,
   PieChart,
   Bot,
-  RotateCcw
+  RotateCcw,
+  Trash2,
+  Code,
+  Shield
 } from "lucide-react"
 
 import { NavProjects } from "@/components/nav-projects"
@@ -23,6 +26,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar"
+import { Button } from "@/components/ui/button"
 
 // This is sample data.
 const data = {
@@ -53,11 +57,35 @@ const data = {
       url: "/xploiter",
       icon: Bot,
     },
+    {
+      name: "Payloads",
+      url: "/payloads",
+      icon: Code,
+    },
+    {
+      name: "Patterns",
+      url: "/patterns",
+      icon: Shield,
+    },
   ],
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const { state } = useSidebar()
+  
+  const handleFlushDb = async () => {
+    try {
+      const response = await fetch('http://localhost:3001/api/flush-db', {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        alert('Database cleared successfully')
+      }
+    } catch (error) {
+      console.error('Failed to flush database:', error)
+      alert('Failed to clear database')
+    }
+  }
   
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -95,6 +123,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               <span className="text-sm text-muted-foreground">API Connected</span>
             )}
           </div>
+          {state === "expanded" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleFlushDb}
+              className="mx-2 mt-2 mb-2 hover:bg-red-500 hover:text-white"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Flush DB
+            </Button>
+          ) : (<></>
+          )}
         </div>
       </SidebarFooter>
       <SidebarRail />

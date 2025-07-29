@@ -20,11 +20,13 @@ import { Switch } from "@/components/ui/switch"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Send } from "lucide-react"
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { useToast } from '@/hooks/use-toast'
 import { Toaster } from '@/components/ui/toaster'
 import { useWebSocket } from "@/contexts/WebSocketContext"
+import { useCurlRequest } from "@/contexts/CurlRequestContext"
 
 interface InterceptedRequest {
   id: number
@@ -43,6 +45,7 @@ export default function ProxyPage() {
   const [selectedRequestIndex, setSelectedRequestIndex] = useState(0)
   const { toast } = useToast()
   const { isConnected, requests, setRequests, sendMessage, isInterceptEnabled, setIsInterceptEnabled } = useWebSocket()
+  const { addRequest } = useCurlRequest()
 
   const handleProxyDecision = (action: 'forward' | 'drop') => {
     if (requests.length === 0) return
@@ -109,6 +112,26 @@ export default function ProxyPage() {
     } catch (error) {
       console.error('Error adding to scope:', error)
     }
+  }
+
+  const handleAddToContext = () => {
+    if (requests.length === 0) return
+    
+    const currentRequest = requests[selectedRequestIndex]
+    if (!currentRequest) return
+    
+    addRequest({
+      method: currentRequest.method,
+      url: currentRequest.url,
+      headers: currentRequest.headers,
+      body: currentRequest.body
+    })
+    
+    toast({
+      variant: "default",
+      title: "Request Added to Context",
+      description: "The curl request has been attached and will be included in your next xploiter message",
+    })
   }
 
   const formatRequestDisplay = (request: InterceptedRequest) => {
@@ -235,7 +258,12 @@ export default function ProxyPage() {
                   >
                     Drop
                   </Button>
-                  <Button size="sm" variant="ai" disabled={!currentRequest}>
+                  <Button 
+                    size="sm" 
+                    variant="ai" 
+                    disabled={!currentRequest}
+                    onClick={handleAddToContext}
+                  >
                     Add to Context
                   </Button>
                 </div>
@@ -259,25 +287,6 @@ export default function ProxyPage() {
                     Configure your browser to use localhost:8080 as HTTP proxy
                   </div>
                 )}
-              </div>
-            </div>
-
-            {/* Bottom Section - Context */}
-            <div className="h-24">
-              <div className="h-full relative">
-                <Textarea
-                  placeholder="Add context notes for AI analysis..."
-                  value={contextNotes}
-                  onChange={(e) => setContextNotes(e.target.value)}
-                  className="h-full resize-none pr-32"
-                />
-                <Button 
-                  size="sm" 
-                  variant="ai"
-                  className="absolute bottom-2 right-2"
-                >
-                  Send to Xploiter
-                </Button>
               </div>
             </div>
           </div>

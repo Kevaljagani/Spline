@@ -137,4 +137,41 @@ router.post('/replay-request', async (req, res) => {
   }
 });
 
+// Chat message endpoints
+router.get('/chat-messages', async (req, res) => {
+  try {
+    const messages = await database.getChatMessages();
+    res.json(messages);
+  } catch (error) {
+    console.error('Error fetching chat messages:', error);
+    res.status(500).json({ error: 'Failed to fetch chat messages' });
+  }
+});
+
+router.post('/chat-messages', async (req, res) => {
+  try {
+    const message = req.body;
+    
+    if (!message.id || !message.type || !message.content) {
+      return res.status(400).json({ error: 'id, type, and content are required' });
+    }
+    
+    await database.saveChatMessage(message);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error saving chat message:', error);
+    res.status(500).json({ error: 'Failed to save chat message' });
+  }
+});
+
+router.delete('/flush-db', async (req, res) => {
+  try {
+    await database.clearAllData();
+    res.json({ success: true, message: 'All data cleared successfully' });
+  } catch (error) {
+    console.error('Error clearing database:', error);
+    res.status(500).json({ error: 'Failed to clear database' });
+  }
+});
+
 module.exports = router;
