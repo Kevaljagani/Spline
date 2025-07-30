@@ -27,6 +27,9 @@ import {
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { ChevronDown, Search, Play, Edit3 } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
+import { Toaster } from '@/components/ui/toaster'
+import { useCurlRequest } from "@/contexts/CurlRequestContext"
 
 interface StoredRequest {
   id: number
@@ -53,6 +56,8 @@ export default function ReplayPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isEditing, setIsEditing] = useState(false)
   const [editableRequest, setEditableRequest] = useState<StoredRequest | null>(null)
+  const { toast } = useToast()
+  const { addRequest } = useCurlRequest()
 
   // Fetch stored requests on component mount
   useEffect(() => {
@@ -212,6 +217,25 @@ export default function ReplayPage() {
     }
   }
 
+  const handleAddToContext = () => {
+    if (!selectedRequest) return
+    
+    const requestToAdd = isEditing && editableRequest ? editableRequest : selectedRequest
+    
+    addRequest({
+      method: requestToAdd.method,
+      url: requestToAdd.url,
+      headers: requestToAdd.headers,
+      body: requestToAdd.body
+    })
+    
+    toast({
+      variant: "default",
+      title: "Request Added to Context",
+      description: "The curl request has been attached and will be included in your next xploiter message",
+    })
+  }
+
   return (
     <div className="flex h-screen bg-background">
       <SidebarProvider>
@@ -328,11 +352,11 @@ export default function ReplayPage() {
             <div className="w-[70%] min-w-[70%] flex flex-col gap-4">
               {/* Header with Replay Button */}
               <div className="flex items-center justify-between flex-shrink-0">
-                <h3 className="text-lg font-semibold truncate mr-4">
+                <h3 className="text-lg font-semibold truncate">
                   {selectedRequest ? `${selectedRequest.method} ${selectedRequest.url}` : 'No request selected'}
                 </h3>
                 {selectedRequest && (
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 flex-shrink-0 mr-4">
                     {isEditing ? (
                       <>
                         <Button 
@@ -349,6 +373,14 @@ export default function ReplayPage() {
                           <Play className="h-4 w-4" />
                           Replay Edited
                         </Button>
+                        <Button 
+                          size="sm" 
+                          variant="ai" 
+                          onClick={handleAddToContext}
+                          className="flex items-center gap-2"
+                        >
+                          Add to Context
+                        </Button>
                       </>
                     ) : (
                       <>
@@ -362,10 +394,18 @@ export default function ReplayPage() {
                         </Button>
                         <Button 
                           onClick={() => handleReplayRequest(selectedRequest)}
-                          className="flex items-center gap-2 mr-2"
+                          className="flex items-center gap-2"
                         >
                           <Play className="h-4 w-4" />
                           Replay
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="ai" 
+                          onClick={handleAddToContext}
+                          className="flex items-center gap-2"
+                        >
+                          Add to Context
                         </Button>
                       </>
                     )}
@@ -481,6 +521,7 @@ export default function ReplayPage() {
           </div>
         </SidebarInset>
       </SidebarProvider>
+      <Toaster />
     </div>
   )
 }

@@ -13,9 +13,10 @@ export interface CurlRequest {
 }
 
 interface CurlRequestContextType {
-  attachedRequest: CurlRequest | null
+  attachedRequests: CurlRequest[]
   addRequest: (request: Omit<CurlRequest, 'id' | 'curlCommand' | 'preview'>) => void
-  removeRequest: () => void
+  removeRequest: (id: string) => void
+  clearAllRequests: () => void
 }
 
 const CurlRequestContext = createContext<CurlRequestContextType | undefined>(undefined)
@@ -61,7 +62,7 @@ const generatePreview = (method: string, url: string): string => {
 }
 
 export const CurlRequestProvider: React.FC<CurlRequestProviderProps> = ({ children }) => {
-  const [attachedRequest, setAttachedRequest] = useState<CurlRequest | null>(null)
+  const [attachedRequests, setAttachedRequests] = useState<CurlRequest[]>([])
 
   const addRequest = (request: Omit<CurlRequest, 'id' | 'curlCommand' | 'preview'>) => {
     const curlCommand = generateCurlCommand(request.method, request.url, request.headers, request.body)
@@ -74,17 +75,22 @@ export const CurlRequestProvider: React.FC<CurlRequestProviderProps> = ({ childr
       preview
     }
     
-    setAttachedRequest(newRequest)
+    setAttachedRequests(prev => [...prev, newRequest])
   }
 
-  const removeRequest = () => {
-    setAttachedRequest(null)
+  const removeRequest = (id: string) => {
+    setAttachedRequests(prev => prev.filter(req => req.id !== id))
+  }
+
+  const clearAllRequests = () => {
+    setAttachedRequests([])
   }
 
   const value: CurlRequestContextType = {
-    attachedRequest,
+    attachedRequests,
     addRequest,
-    removeRequest
+    removeRequest,
+    clearAllRequests
   }
 
   return (

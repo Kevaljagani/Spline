@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import {
-  Rocket,
+  SplinePointer,
   Loader,
   GalleryVerticalEnd,
   Map,
@@ -93,12 +93,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <a href="#">
-                <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-                  <Rocket className="size-4" />
+              <a className="bg-stone-100" href="#">
+                <div className="bg-stone-200 text-stone-800 flex aspect-square size-8 items-center justify-center rounded-lg">
+                  <SplinePointer className="size-6" />
                 </div>
-                <div className="grid flex-1 text-left text-lg leading-tight">
-                  <span className="truncate font-medium">Torpedo</span>
+                <div className="grid flex-1 text-left text-xl leading-tight">
+                  <span className="truncate font-black tracking-wide bg-gradient-to-r from-stone-700 to-stone-900 bg-clip-text text-transparent">Spline</span>
                 </div>
               </a>
             </SidebarMenuButton>

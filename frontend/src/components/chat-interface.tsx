@@ -82,7 +82,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   
-  const { attachedRequest, removeRequest } = useCurlRequest()
+  const { attachedRequests, removeRequest, clearAllRequests } = useCurlRequest()
   
   const wsService = useRef<CAIWebSocketService | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -229,9 +229,10 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
 
     let messageContent = inputMessage.trim()
     
-    // Prepend curl request if attached
-    if (attachedRequest) {
-      messageContent = `${attachedRequest.curlCommand}\n\n${messageContent}`
+    // Prepend curl requests if attached
+    if (attachedRequests.length > 0) {
+      const curlCommands = attachedRequests.map(req => req.curlCommand).join('\n\n')
+      messageContent = `${curlCommands}\n\n${messageContent}`
     }
 
     const userMessage: ChatMessage = {
@@ -248,9 +249,9 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     setInputMessage('')
     setIsProcessing(true)
     
-    // Clear the attached request after sending
-    if (attachedRequest) {
-      removeRequest()
+    // Clear all attached requests after sending
+    if (attachedRequests.length > 0) {
+      clearAllRequests()
     }
   }
 
@@ -414,21 +415,37 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
 
       {/* Input */}
       <div className="pt-4 border-t">
-        {/* Attached Request Badge */}
-        {attachedRequest && (
-          <div className="mb-3 flex items-center gap-2">
-            <Badge variant="secondary" className="flex items-center gap-2">
-              <span className="text-xs font-mono">{attachedRequest.preview}</span>
+        {/* Attached Requests Badges */}
+        {attachedRequests.length > 0 && (
+          <div className="mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-muted-foreground">
+                {attachedRequests.length} request{attachedRequests.length > 1 ? 's' : ''} attached
+              </span>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-4 w-4 p-0 hover:bg-transparent"
-                onClick={removeRequest}
+                className="h-5 w-5 p-0 hover:bg-transparent text-muted-foreground"
+                onClick={clearAllRequests}
               >
                 <X className="h-3 w-3" />
               </Button>
-            </Badge>
-            <span className="text-xs text-muted-foreground">Request attached</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {attachedRequests.map((request) => (
+                <Badge key={request.id} variant="secondary" className="flex items-center gap-2">
+                  <span className="text-xs font-mono">{request.preview}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-4 w-4 p-0 hover:bg-transparent"
+                    onClick={() => removeRequest(request.id)}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </Badge>
+              ))}
+            </div>
           </div>
         )}
         <div className="flex gap-2">
