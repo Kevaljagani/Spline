@@ -13,7 +13,8 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
-  X
+  X,
+  ChevronDown
 } from 'lucide-react'
 import { CAIWebSocketService, StreamEvent } from '@/services/caiWebSocket'
 import { useCurlRequest } from '@/contexts/CurlRequestContext'
@@ -78,6 +79,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const [isProcessing, setIsProcessing] = useState(false)
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('')
   const [isLoading, setIsLoading] = useState(true)
+  const [currentAgent, setCurrentAgent] = useState('Default Agent')
   
   const { attachedRequests, removeRequest, clearAllRequests } = useCurlRequest()
   
@@ -152,6 +154,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
           break
         case 'agent_updated':
           if (event.agent_name) {
+            setCurrentAgent(event.agent_name)
             addSystemMessageLocal(`Agent changed to: ${event.agent_name}`)
           }
           break
@@ -431,19 +434,27 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
           </div>
         )}
         <div className="flex gap-2">
-          <Textarea
-            placeholder="Type your message here..."
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                sendMessage()
-              }
-            }}
-            className="flex-1 min-h-[44px] max-h-32 resize-none"
-            disabled={!isConnected || isProcessing}
-          />
+          <div className="flex-1 relative">
+            <Textarea
+              placeholder="Type your message here..."
+              value={inputMessage}
+              onChange={(e) => setInputMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  sendMessage()
+                }
+              }}
+              className="min-h-[44px] max-h-32 resize-none pb-8"
+              disabled={!isConnected || isProcessing}
+            />
+            {/* Agent selector inside textarea */}
+            <div className="absolute bottom-2 left-3 flex items-center gap-1 text-xs text-muted-foreground">
+              <Bot className="h-3 w-3" />
+              <span>{currentAgent}</span>
+              <ChevronDown className="h-3 w-3" />
+            </div>
+          </div>
           <div className="flex gap-2">
             <TooltipProvider>
               <Tooltip>
