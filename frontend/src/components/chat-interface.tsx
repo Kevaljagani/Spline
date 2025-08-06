@@ -6,8 +6,6 @@ import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
 import { 
-  Play, 
-  Pause, 
   Square, 
   Send, 
   Bot, 
@@ -53,9 +51,9 @@ function FormattedContent({ content }: { content: string }) {
             
             if (isBlock || isCurl) {
               return (
-                <pre className="bg-gray-100 text-red-500 p-4 rounded-lg my-4 overflow-x-auto">
+                // <pre className="bg-gray-100 text-red-500 p-4 rounded-lg my-4 overflow-x-auto">
                   <code className="text-sm font-mono">{children}</code>
-                </pre>
+                // </pre>
               )
             } else {
               return (
@@ -77,7 +75,6 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputMessage, setInputMessage] = useState('')
   const [isConnected, setIsConnected] = useState(false)
-  const [isPaused, setIsPaused] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('')
   const [isLoading, setIsLoading] = useState(true)
@@ -140,8 +137,6 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     }
 
     const handleStreamEventLocal = (event: StreamEvent) => {
-      if (isPaused) return
-
       switch (event.type) {
         case 'raw_response':
           if (event.data?.delta) {
@@ -188,7 +183,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
           break
         case 'interrupted':
           setIsProcessing(false)
-          addSystemMessageLocal('Request was interrupted')
+          addSystemMessageLocal('Interrupted')
           break
       }
     }
@@ -217,7 +212,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
         wsService.current.disconnect()
       }
     }
-  }, [isPaused])
+  }, [])
 
   useEffect(() => {
     scrollToBottom()
@@ -297,25 +292,12 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     })
   }
 
-  const handlePause = () => {
-    setIsPaused(!isPaused)
-    if (!isPaused) {
-      addSystemMessage('Stream paused')
-    } else {
-      addSystemMessage('Stream resumed')
+  const handleCancel = () => {
+    if (wsService.current) {
+      wsService.current.interrupt()
     }
   }
 
-  const handleCancel = () => {
-    if (wsService.current && isProcessing) {
-      wsService.current.interrupt()
-      setIsProcessing(false)
-      addSystemMessage('Request cancelled')
-      if (currentAssistantMessage) {
-        finalizeAssistantMessage()
-      }
-    }
-  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
@@ -470,26 +452,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
                     className='w-12 h-12'
                     variant="outline"
                     size="icon"
-                    onClick={handlePause}
-                    disabled={!isProcessing}
-                  >
-                    {isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{isPaused ? 'Resume stream' : 'Pause stream'}</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    className='w-12 h-12'
-                    variant="outline"
-                    size="icon"
                     onClick={handleCancel}
-                    disabled={!isProcessing}
                   >
                     <Square className="h-4 w-4" />
                   </Button>
