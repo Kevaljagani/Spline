@@ -14,10 +14,13 @@ import {
   CheckCircle,
   Clock,
   X,
-  ChevronDown
+  ChevronDown,
+  File
 } from 'lucide-react'
 import { CAIWebSocketService, StreamEvent } from '@/services/caiWebSocket'
 import { useCurlRequest } from '@/contexts/CurlRequestContext'
+import { usePayloadAttachment, PayloadFile } from '@/contexts/PayloadAttachmentContext'
+import { PayloadSelector } from '@/components/payload-selector'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -80,12 +83,16 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [currentAgent, setCurrentAgent] = useState('Default Agent')
+  const [showPayloadSelector, setShowPayloadSelector] = useState(false)
+  const [payloadSelectorPosition, setPayloadSelectorPosition] = useState({ top: 0, left: 0 })
   
   const { attachedRequests, removeRequest, clearAllRequests } = useCurlRequest()
+  const { attachedPayloads, attachPayload, removePayload, clearAllPayloads } = usePayloadAttachment()
   
   const wsService = useRef<CAIWebSocketService | null>(null)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     // Load messages from database on component mount
@@ -226,6 +233,12 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
     if (!inputMessage.trim() || !isConnected || !wsService.current) return
 
     let messageContent = inputMessage.trim()
+    let payloadPaths: string[] = []
+    
+    // Collect payload paths for backend
+    if (attachedPayloads.length > 0) {
+      payloadPaths = attachedPayloads.map(payload => payload.file.fullPath)
+    }
     
     // Prepend curl requests if attached
     if (attachedRequests.length > 0) {
@@ -243,13 +256,23 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
 
     setMessages(prev => [...prev, userMessage])
     saveMessage(userMessage)
-    wsService.current.sendUserInput(messageContent)
+    
+    // Send message with payload paths to WebSocket
+    if (payloadPaths.length > 0) {
+      wsService.current.sendUserInput(messageContent, payloadPaths)
+    } else {
+      wsService.current.sendUserInput(messageContent)
+    }
+    
     setInputMessage('')
     setIsProcessing(true)
     
-    // Clear all attached requests after sending
+    // Clear all attached items after sending
     if (attachedRequests.length > 0) {
       clearAllRequests()
+    }
+    if (attachedPayloads.length > 0) {
+      clearAllPayloads()
     }
   }
 
@@ -298,6 +321,69 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
   const handleCancel = () => {
     if (wsService.current) {
       wsService.current.interrupt()
+    }
+  }
+
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value
+    const cursorPosition = e.target.selectionStart
+    
+    setInputMessage(value)
+    
+    // Check if @ was just typed
+    if (value[cursorPosition - 1] === '@' && (cursorPosition === 1 || value[cursorPosition - 2] === ' ')) {
+      // Calculate position for payload selector (positioned above textarea)
+      const textarea = e.target
+      const rect = textarea.getBoundingClientRect()
+      
+      // Calculate position to show above the textarea
+      const selectorHeight = 300 // max height of selector
+      const topPosition = rect.top + window.scrollY - selectorHeight - 10 // 10px gap above textarea
+      
+      setPayloadSelectorPosition({
+        top: topPosition,
+        left: rect.left + window.scrollX
+      })
+      setShowPayloadSelector(true)
+    } else if (showPayloadSelector) {
+      // Check if we should close the selector
+      const textBeforeCursor = value.substring(0, cursorPosition)
+      const lastAtIndex = textBeforeCursor.lastIndexOf('@')
+      
+      if (lastAtIndex === -1 || textBeforeCursor.substring(lastAtIndex).includes(' ')) {
+        setShowPayloadSelector(false)
+      }
+    }
+  }
+
+  const handlePayloadSelect = (file: PayloadFile) => {
+    attachPayload(file)
+    
+    // Remove the @ trigger from the input
+    const cursorPosition = textareaRef.current?.selectionStart || 0
+    const textBeforeCursor = inputMessage.substring(0, cursorPosition)
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@')
+    
+    if (lastAtIndex !== -1) {
+      const newText = inputMessage.substring(0, lastAtIndex) + inputMessage.substring(cursorPosition)
+      setInputMessage(newText)
+      
+      // Focus back to textarea and position cursor
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus()
+          textareaRef.current.setSelectionRange(lastAtIndex, lastAtIndex)
+        }
+      }, 0)
+    }
+    
+    setShowPayloadSelector(false)
+  }
+
+  const handlePayloadSelectorClose = () => {
+    setShowPayloadSelector(false)
+    if (textareaRef.current) {
+      textareaRef.current.focus()
     }
   }
 
@@ -399,7 +485,43 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
       </ScrollArea>
 
       {/* Input */}
-      <div className="pt-4 border-t">
+      <div className="flex-shrink-0 pt-4 border-t bg-background">
+        {/* Attached Payloads Badges */}
+        <div className='flex'>
+        {attachedPayloads.length > 0 && (
+          <div className="mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-muted-foreground">
+                {attachedPayloads.length} payload{attachedPayloads.length > 1 ? 's' : ''} attached
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 w-5 p-0 hover:bg-transparent text-muted-foreground"
+                onClick={clearAllPayloads}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {attachedPayloads.map((payload) => (
+                <Badge key={payload.id} variant="outline" className="flex items-center gap-2 bg-purple-50 border-purple-200 text-purple-700">
+                  <File className="h-3 w-3" />
+                  <span className="text-xs">{payload.preview}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-4 w-4 p-0 hover:bg-transparent"
+                    onClick={() => removePayload(payload.id)}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Attached Requests Badges */}
         {attachedRequests.length > 0 && (
           <div className="mb-3">
@@ -418,7 +540,7 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
             </div>
             <div className="flex flex-wrap gap-2">
               {attachedRequests.map((request) => (
-                <Badge key={request.id} variant="secondary" className="flex items-center gap-2">
+                <Badge key={request.id} variant="outline" className="flex items-center gap-2 bg-orange-50 border-orange-200 text-orange-700">
                   <span className="text-xs font-mono">{request.preview}</span>
                   <Button
                     variant="ghost"
@@ -433,14 +555,16 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
             </div>
           </div>
         )}
+        </div>
         <div className="flex gap-2">
           <div className="flex-1 relative">
             <Textarea
-              placeholder="Type your message here..."
+              ref={textareaRef}
+              placeholder="Type your message here... (Use @ to attach payload files)"
               value={inputMessage}
-              onChange={(e) => setInputMessage(e.target.value)}
+              onChange={handleTextareaChange}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                if (e.key === 'Enter' && !e.shiftKey && !showPayloadSelector) {
                   e.preventDefault()
                   sendMessage()
                 }
@@ -498,6 +622,15 @@ export function ChatInterface({ className }: ChatInterfaceProps) {
           </p>
         )}
       </div>
+
+      {/* Payload Selector */}
+      {showPayloadSelector && (
+        <PayloadSelector
+          onSelect={handlePayloadSelect}
+          onClose={handlePayloadSelectorClose}
+          // position={payloadSelectorPosition}
+        />
+      )}
     </div>
   )
 }

@@ -1,8 +1,179 @@
 const express = require('express');
 const ProxyController = require('../controllers/ProxyController');
 const database = require('../database');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const simpleGit = require('simple-git');
 
 const router = express.Router();
+
+// Create payloads directory if it doesn't exist
+const payloadsDir = path.join(__dirname, '..', 'payloads');
+if (!fs.existsSync(payloadsDir)) {
+  fs.mkdirSync(payloadsDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadPath = path.join(payloadsDir, req.body.folderName || 'uploaded-folder');
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    }
+    cb(null, uploadPath);
+  },
+  filename: function (req, file, cb) {
+    cb(null, file.originalname);
+  }
+});
+
+const upload = multer({ storage: storage });
+
+// Payload endpoints
+
+// Get all payload folders
+router.get('/payloads', (req, res) => {
+  try {
+    const folders = fs.readdirSync(payloadsDir, { withFileTypes: true })
+      .filter(dirent => dirent.isDirectory())
+      .map(dirent => dirent.name);
+    res.json(folders);
+  } catch (error) {
+    console.error('Error reading payloads directory:', error);
+    res.status(500).json({ error: 'Failed to read payloads directory' });
+  }
+});
+
+// Get folder contents
+router.get('/payloads/:folderName/browse', (req, res) => {
+  try {
+    const { folderName } = req.params;
+    const folderPath = path.join(payloadsDir, folderName);
+    
+    if (!fs.existsSync(folderPath)) {
+      return res.status(404).json({ error: 'Folder not found' });
+    }
+
+    const browsePath = req.query.path || '';
+    const fullPath = path.join(folderPath, browsePath);
+
+    if (!fullPath.startsWith(folderPath)) {
+      return res.status(400).json({ error: 'Invalid path' });
+    }
+
+    const items = fs.readdirSync(fullPath, { withFileTypes: true }).map(item => ({
+      name: item.name,
+      type: item.isDirectory() ? 'directory' : 'file',
+      path: path.join(browsePath, item.name).replace(/\\/g, '/')
+    }));
+
+    res.json(items);
+  } catch (error) {
+    console.error('Error browsing folder:', error);
+    res.status(500).json({ error: 'Failed to browse folder' });
+  }
+});
+
+// Get file content (for txt files)
+router.get('/payloads/:folderName/file', (req, res) => {
+  try {
+    const { folderName } = req.params;
+    const filePath = req.query.path;
+    
+    if (!filePath) {
+      return res.status(400).json({ error: 'File path is required' });
+    }
+
+    const fullPath = path.join(payloadsDir, folderName, filePath);
+    const folderPath = path.join(payloadsDir, folderName);
+
+    if (!fullPath.startsWith(folderPath)) {
+      return res.status(400).json({ error: 'Invalid file path' });
+    }
+
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const ext = path.extname(fullPath).toLowerCase();
+    if (ext !== '.txt') {
+      return res.status(400).json({ error: 'Only .txt files can be previewed' });
+    }
+
+    const content = fs.readFileSync(fullPath, 'utf8');
+    res.json({ content });
+  } catch (error) {
+    console.error('Error reading file:', error);
+    res.status(500).json({ error: 'Failed to read file' });
+  }
+});
+
+// Upload files to create a folder
+router.post('/payloads/upload', upload.array('files'), (req, res) => {
+  try {
+    const { folderName } = req.body;
+    if (!folderName) {
+      return res.status(400).json({ error: 'Folder name is required' });
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `Files uploaded to ${folderName}`,
+      folderName 
+    });
+  } catch (error) {
+    console.error('Error uploading files:', error);
+    res.status(500).json({ error: 'Failed to upload files' });
+  }
+});
+
+// Clone git repository
+router.post('/payloads/clone', async (req, res) => {
+  try {
+    const { gitUrl, folderName } = req.body;
+    
+    if (!gitUrl || !folderName) {
+      return res.status(400).json({ error: 'Git URL and folder name are required' });
+    }
+
+    const clonePath = path.join(payloadsDir, folderName);
+    
+    if (fs.existsSync(clonePath)) {
+      return res.status(400).json({ error: 'Folder already exists' });
+    }
+
+    const git = simpleGit();
+    await git.clone(gitUrl, clonePath);
+    
+    res.json({ 
+      success: true, 
+      message: `Repository cloned to ${folderName}`,
+      folderName 
+    });
+  } catch (error) {
+    console.error('Error cloning repository:', error);
+    res.status(500).json({ error: 'Failed to clone repository: ' + error.message });
+  }
+});
+
+// Delete payload folder
+router.delete('/payloads/:folderName', (req, res) => {
+  try {
+    const { folderName } = req.params;
+    const folderPath = path.join(payloadsDir, folderName);
+    
+    if (!fs.existsSync(folderPath)) {
+      return res.status(404).json({ error: 'Folder not found' });
+    }
+
+    fs.rmSync(folderPath, { recursive: true, force: true });
+    res.json({ success: true, message: `Folder ${folderName} deleted` });
+  } catch (error) {
+    console.error('Error deleting folder:', error);
+    res.status(500).json({ error: 'Failed to delete folder' });
+  }
+});
 
 // Health check endpoint
 router.get('/hello', (req, res) => {

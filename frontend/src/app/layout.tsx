@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { WebSocketProvider } from "@/contexts/WebSocketContext";
 import { CurlRequestProvider } from "@/contexts/CurlRequestContext";
+import { PayloadAttachmentProvider } from "@/contexts/PayloadAttachmentContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,7 +32,9 @@ export default function RootLayout({
       >
         <WebSocketProvider>
           <CurlRequestProvider>
-            {children}
+            <PayloadAttachmentProvider>
+              {children}
+            </PayloadAttachmentProvider>
           </CurlRequestProvider>
         </WebSocketProvider>
       </body>

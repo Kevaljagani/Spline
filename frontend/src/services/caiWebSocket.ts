@@ -4,6 +4,7 @@ export interface CAIMessage {
   content?: string
   command?: string
   args?: string[]
+  payload_paths?: string[]
   timestamp?: number
 }
 
@@ -123,11 +124,12 @@ export class CAIWebSocketService {
     }
   }
 
-  sendUserInput(content: string) {
+  sendUserInput(content: string, payloadPaths?: string[]) {
     const message: CAIMessage = {
       type: 'user_input',
       session_id: this.sessionId,
       content,
+      payload_paths: payloadPaths,
       timestamp: Date.now()
     }
     this.sendMessage(message)
