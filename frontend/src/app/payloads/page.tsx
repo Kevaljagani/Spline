@@ -44,6 +44,7 @@ interface PreviewData {
 }
 
 export default function PayloadsPage() {
+  const [mounted, setMounted] = useState(false)
   const [payloadFolders, setPayloadFolders] = useState<string[]>([])
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
   const [currentPath, setCurrentPath] = useState<string>("")
@@ -307,8 +308,13 @@ export default function PayloadsPage() {
   }
 
   useEffect(() => {
+    setMounted(true)
     loadPayloadFolders()
   }, [])
+
+  if (!mounted) {
+    return null
+  }
 
   return (
     <div className="flex h-screen bg-background">
