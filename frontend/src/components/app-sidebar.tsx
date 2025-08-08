@@ -95,7 +95,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <SidebarMenuButton size="lg" asChild>
               <a className="bg-stone-100" href="#">
                 <div className="bg-stone-200 text-stone-800 flex aspect-square size-8 items-center justify-center rounded-lg">
-                  <SplinePointer className="size-6" />
+                  <SplinePointer className="size-6 text-purple-500" />
                 </div>
                 <div className="grid flex-1 text-left text-xl leading-tight">
                   <span className="truncate font-black tracking-wide bg-gradient-to-r from-stone-700 to-stone-900 bg-clip-text text-transparent">Spline</span>

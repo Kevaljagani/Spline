@@ -438,7 +438,7 @@ export default function PayloadsPage() {
                       <CardHeader className="pb-3">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <Folder className="w-5 h-5 text-blue-500" />
+                            <Folder className="w-5 h-5 text-purple-500" />
                             <CardTitle className="text-lg">{folder}</CardTitle>
                           </div>
                           <Button
@@ -479,7 +479,7 @@ export default function PayloadsPage() {
                     Back
                   </Button>
                   <div className="flex items-center gap-2">
-                    <Folder className="w-5 h-5 text-blue-500" />
+                    <Folder className="w-5 h-5 text-purple-500" />
                     <h2 className="text-xl font-semibold">{selectedFolder}</h2>
                     {currentPath && (
                       <>
