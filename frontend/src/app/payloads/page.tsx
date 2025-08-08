@@ -345,7 +345,7 @@ export default function PayloadsPage() {
                 <div className="flex justify-between items-center">
                   {/* <h1 className="text-2xl font-bold">Payload Management</h1> */}
                   <div className="flex gap-2">
-                    <Button onClick={() => loadPayloadFolders()} variant="outline" size="sm">
+                    <Button onClick={() => loadPayloadFolders()} variant="outline">
                       <RefreshCw className="w-4 h-4 mr-2" />
                       Refresh
                     </Button>
